@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF to Speech</title>
+  <style>
+    #controls {
+      margin-top: 10px;
+    }
+    #speedControl {
+      margin-top: 15px;
+    }
+  </style>
+</head>
+<body>
+  <h1>PDF to Speech</h1>
+  <input type="file" id="pdf-input" accept="application/pdf">
+  <div id="controls">
+    <button onclick="startReading()">Play</button>
+    <button onclick="pauseReading()">Pause</button>
+    <button onclick="stopReading()">Stop</button>
+  </div>
+
+  <div id="speedControl">
+    <label for="speed">Speech Speed: </label>
+    <input type="range" id="speed" min="0.5" max="2.0" step="0.1" value="1.0" oninput="updateSpeed(this.value)">
+    <span id="speedValue">1.0x</span>
+  </div>
+
+  <!-- Include the PDF.js library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+  
+  <script>
+    let speech = new SpeechSynthesisUtterance();
+    let speechPaused = false;
+    let fullText = '';
+    let currentPosition = 0;  // Track current reading position
+    let pdfIsLoaded = false;
+
+    // Set up PDF.js worker
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js';
+
+    // Load the PDF and extract text
+    async function startReading() {
+      const file = document.getElementById('pdf-input').files[0];
+
+      if (file && !pdfIsLoaded) {
+        const reader = new FileReader();
+
+        // This function will be triggered once the file is read into memory
+        reader.onload = async function () {
+          const typedarray = new Uint8Array(this.result);
+          const pdf = await pdfjsLib.getDocument(typedarray).promise;
+          fullText = '';
+
+          // Loop through each page of the PDF
+          for (let i = 0; i < pdf.numPages; i++) {
+            const page = await pdf.getPage(i + 1);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map(item => item.str).join(' ');
+            fullText += pageText + ' ';
+          }
+
+          // PDF is loaded, reset position and start reading
+          pdfIsLoaded = true;
+          currentPosition = 0;
+          playSpeech(currentPosition);
+        };
+
+        reader.readAsArrayBuffer(file);
+      } else if (pdfIsLoaded && speechPaused) {
+        // Resume from where paused
+        window.speechSynthesis.resume();
+        speechPaused = false;
+      } else {
+        // Start from current position
+        playSpeech(currentPosition);
+      }
+    }
+
+    // Play speech from the current position
+    function playSpeech(position) {
+      stopReading(); // Ensure no previous speech is ongoing
+
+      speech = new SpeechSynthesisUtterance(fullText.slice(position));
+      speech.rate = parseFloat(document.getElementById('speed').value);
+
+      // Update current position when words are spoken
+      speech.onboundary = (event) => {
+        if (event.name === "word") {
+          currentPosition = event.charIndex;
+        }
+      };
+
+      // Speak the remaining text from current position
+      window.speechSynthesis.speak(speech);
+    }
+
+    // Pause the speech
+    function pauseReading() {
+      if (window.speechSynthesis.speaking) {
+        window.speechSynthesis.pause();
+        speechPaused = true;
+      }
+    }
+
+    // Stop the speech and reset playback position to the beginning
+    function stopReading() {
+      if (window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+      }
+      speechPaused = false;
+      currentPosition = 0;  // Reset to the start of the document
+    }
+
+    // Update the speed and continue reading from the current position
+    function updateSpeed(speed) {
+      document.getElementById('speedValue').textContent = `${speed}x`;
+      speech.rate = parseFloat(speed);
+
+      // If speech is ongoing, restart from the current position at the new speed
+      if (window.speechSynthesis.speaking && !speechPaused) {
+        window.speechSynthesis.cancel(); // Stop current speech
+        playSpeech(currentPosition); // Resume from the current position
+      }
+    }
+  </script>
+
+</body>
+</html>
